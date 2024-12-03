@@ -20,8 +20,11 @@ workspace = true
 [dependencies]
 crc = "3.0"
 scursor = "0.2.0"
+tokio-util = { version = "0.7", features = ["codec"] }
+tokio-stream = "0.1"
 tokio = { workspace = true, features = ["net", "sync", "io-util", "io-std", "time", "rt", "rt-multi-thread", "macros"] }
 tracing = { workspace = true }
+futures-util = "0.3"
 
 # TLS dependencies
 rx509 = { version = "^0.2", optional = true }

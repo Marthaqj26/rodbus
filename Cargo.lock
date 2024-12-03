@@ -955,6 +955,7 @@ version = "1.4.0"
 dependencies = [
  "clap 4.5.7",
  "crc",
+ "futures-util",
  "rx509",
  "scursor",
  "sfio-rustls-config",
