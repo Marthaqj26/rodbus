@@ -40,7 +40,8 @@ sfio-tokio-mock-io = "0.2"
 tracing-subscriber = { workspace = true }
 
 [features]
-default = ["tls", "serial"]
+default = ["tls", "serial", "overtcp"]
 ffi = []
 tls = ["rx509", "sfio-rustls-config", "tokio-rustls"]
 serial = ["tokio-serial"]
+overtcp = []

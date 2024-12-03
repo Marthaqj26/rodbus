@@ -244,3 +244,80 @@ async fn spawn_tls_server_task_impl<T: RequestHandler>(
 
     Ok(ServerHandle::new(tx))
 }
+
+/// Spawns a Modbus RTU over TCP server.
+///
+/// This function starts a server that listens for Modbus RTU frames sent over a TCP connection.
+/// Each incoming connection is handled asynchronously.
+///
+/// # Arguments
+/// - `addr`: The socket address where the server will listen.
+/// - `handlers`: A map of request handlers to process Modbus requests.
+/// - `decode`: The decoding level to apply for debugging or verbose logs.
+///
+/// # Returns
+/// - `Result<ServerHandle, std::io::Error>`: The server handle if the operation succeeds,
+/// or an I/O error if the server fails to start.
+#[cfg(feature = "overtcp")]
+pub async fn spawn_rtu_overtcp_server_task<T: RequestHandler>(
+    addr: SocketAddr,
+    handlers: ServerHandlerMap<T>,
+    decode: DecodeLevel,
+) -> Result<ServerHandle, std::io::Error> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+
+    let (tx, rx) = tokio::sync::mpsc::channel(SERVER_SETTING_CHANNEL_CAPACITY);
+
+    let mut session = crate::server::task::SessionTask::new(
+        handlers,
+        crate::server::task::AuthorizationType::None,
+        crate::common::frame::FrameWriter::rtu(),
+        crate::common::frame::FramedReader::rtu_request(),
+        rx,
+        decode,
+    );
+    let task = async move {
+        loop {
+            match listener.accept().await {
+                Ok((stream, client_addr)) => {
+                    tracing::info!("Nueva conection desde {:?}", addr);
+
+                    let mut phys_layer = crate::common::phys::PhysLayer::new_tcp(stream);
+
+                    let result = session.run(&mut phys_layer).await;
+                    match result {
+                        crate::RequestError::Io(error_kind) => println!("Err! {:?}", error_kind),
+                        crate::RequestError::Exception(exception_code) => {
+                            println!("Err! {:?}", exception_code)
+                        }
+                        crate::RequestError::BadRequest(invalid_request) => {
+                            println!("Err! {:?}", invalid_request)
+                        }
+                        crate::RequestError::BadFrame(frame_parse_error) => {
+                            println!("Err! {:?}", frame_parse_error)
+                        }
+                        crate::RequestError::BadResponse(adu_parse_error) => {
+                            println!("Err! {:?}", adu_parse_error)
+                        }
+                        crate::RequestError::ResponseTimeout => {
+                            println!("ResponseTimeout")
+                        }
+                        crate::RequestError::NoConnection => println!("NoConnection"),
+                        crate::RequestError::Internal(internal) => println!("Err! {:?}", internal),
+                        crate::RequestError::Shutdown => {
+                            println!("Sesión con {:?} finalizada debido a Shutdown.", client_addr)
+                        }
+                    }
+                }
+
+                Err(e) => {
+                    tracing::error!("Error al aceptar conection: {:?}", e);
+                }
+            }
+        }
+    };
+
+    tokio::spawn(task);
+
+    Ok(ServerHandle::new(tx))
+}
