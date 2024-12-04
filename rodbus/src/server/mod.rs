@@ -280,38 +280,45 @@ pub async fn spawn_rtu_overtcp_server_task<T: RequestHandler>(
         loop {
             match listener.accept().await {
                 Ok((stream, client_addr)) => {
-                    tracing::info!("Nueva conection desde {:?}", addr);
+                    tracing::info!("New connection from {:?}", addr);
+                    println!("[{}:{}] New connection from {:?}", file!(), line!(), addr);
 
                     let mut phys_layer = crate::common::phys::PhysLayer::new_tcp(stream);
 
                     let result = session.run(&mut phys_layer).await;
                     match result {
-                        crate::RequestError::Io(error_kind) => println!("Err! {:?}", error_kind),
+                        crate::RequestError::Io(error_kind) => {
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), error_kind)
+                        }
                         crate::RequestError::Exception(exception_code) => {
-                            println!("Err! {:?}", exception_code)
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), exception_code)
                         }
                         crate::RequestError::BadRequest(invalid_request) => {
-                            println!("Err! {:?}", invalid_request)
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), invalid_request)
                         }
                         crate::RequestError::BadFrame(frame_parse_error) => {
-                            println!("Err! {:?}", frame_parse_error)
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), frame_parse_error)
                         }
                         crate::RequestError::BadResponse(adu_parse_error) => {
-                            println!("Err! {:?}", adu_parse_error)
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), adu_parse_error)
                         }
                         crate::RequestError::ResponseTimeout => {
-                            println!("ResponseTimeout")
+                            println!("[{}:{}] ResponseTimeout", file!(), line!())
                         }
-                        crate::RequestError::NoConnection => println!("NoConnection"),
-                        crate::RequestError::Internal(internal) => println!("Err! {:?}", internal),
+                        crate::RequestError::NoConnection => {
+                            println!("[{}:{}] NoConnection", file!(), line!())
+                        }
+                        crate::RequestError::Internal(internal) => {
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), internal)
+                        }
                         crate::RequestError::Shutdown => {
-                            println!("Sesión con {:?} finalizada debido a Shutdown.", client_addr)
+                            println!("Session with {:?} terminated due to Shutdown.", client_addr)
                         }
                     }
                 }
 
                 Err(e) => {
-                    tracing::error!("Error al aceptar conection: {:?}", e);
+                    tracing::error!("Error accepting connection: {:?}", e);
                 }
             }
         }
