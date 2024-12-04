@@ -1,14 +1,10 @@
 use std::net::SocketAddr;
 
-use tokio_util::bytes::{Buf, BytesMut};
-use tokio_util::codec::{Decoder, Encoder};
 use tracing::Instrument;
 
 use crate::decode::DecodeLevel;
 use crate::server::task::ServerSetting;
 use crate::tcp::server::{ServerTask, TcpServerConnectionHandler};
-use futures_util::sink::SinkExt;
-use tokio_stream::StreamExt;
 
 /// server handling
 mod address_filter;
@@ -265,68 +261,64 @@ async fn spawn_tls_server_task_impl<T: RequestHandler>(
 #[cfg(feature = "overtcp")]
 pub async fn spawn_rtu_overtcp_server_task<T: RequestHandler>(
     addr: SocketAddr,
-    _handlers: ServerHandlerMap<T>,
-    _decode: DecodeLevel,
+    handlers: ServerHandlerMap<T>,
+    decode: DecodeLevel,
 ) -> Result<ServerHandle, std::io::Error> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    println!("Servidor RTU over TCP escuchando en {}", addr);
 
-    let (tx, _rx) = tokio::sync::mpsc::channel(SERVER_SETTING_CHANNEL_CAPACITY);
+    let (tx, rx) = tokio::sync::mpsc::channel(SERVER_SETTING_CHANNEL_CAPACITY);
 
+    let mut session = crate::server::task::SessionTask::new(
+        handlers,
+        crate::server::task::AuthorizationType::None,
+        crate::common::frame::FrameWriter::rtu(),
+        crate::common::frame::FramedReader::rtu_request(),
+        rx,
+        decode,
+    );
     let task = async move {
         loop {
             match listener.accept().await {
                 Ok((stream, client_addr)) => {
-                    println!("Nueva conection desde {:?}", addr);
+                    tracing::info!("New connection from {:?}", addr);
+                    println!("[{}:{}] New connection from {:?}", file!(), line!(), addr);
 
-                    let mut framed = tokio_util::codec::Framed::new(stream, ModbusRtuOverTcpCodec);
+                    let mut phys_layer = crate::common::phys::PhysLayer::new_tcp(stream);
 
-                    tokio::spawn(async move {
-                        while let Some(Ok((unit_id, function_code, data))) = framed.next().await {
-                            println!(
-                                "Unidad {}: Código de Función {}: Datos recibidos: {:?}",
-                                unit_id, function_code, data
-                            );
-
-                            let response_data = match function_code {
-                                0x01 | 0x02 | 0x03 | 0x04 => vec![0x02, 0x00, 0x01], // Ejemplo: Leer registros
-                                0x05 | 0x06 => vec![0x00, 0x01], // Ejemplo: Escribir un registro
-                                _ => vec![function_code | 0x80, 0x01], // Código de función no soportado
-                            };
-
-                            if !response_data.is_empty() {
-                                if let Err(e) = framed.send((unit_id, response_data)).await {
-                                    match e.kind() {
-                                        std::io::ErrorKind::ConnectionReset => {
-                                            println!(
-                                                "Conexión reiniciada por el cliente: {}",
-                                                client_addr
-                                            );
-                                        }
-                                        std::io::ErrorKind::BrokenPipe => {
-                                            println!(
-                                                "Conexión cerrada inesperadamente: {}",
-                                                client_addr
-                                            );
-                                        }
-                                        _ => {
-                                            eprintln!(
-                                                "Error inesperado al enviar respuesta: {}",
-                                                e
-                                            );
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
+                    let result = session.run(&mut phys_layer).await;
+                    match result {
+                        crate::RequestError::Io(error_kind) => {
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), error_kind)
                         }
-
-                        println!("Conexión cerrada desde {}", client_addr);
-                    });
+                        crate::RequestError::Exception(exception_code) => {
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), exception_code)
+                        }
+                        crate::RequestError::BadRequest(invalid_request) => {
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), invalid_request)
+                        }
+                        crate::RequestError::BadFrame(frame_parse_error) => {
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), frame_parse_error)
+                        }
+                        crate::RequestError::BadResponse(adu_parse_error) => {
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), adu_parse_error)
+                        }
+                        crate::RequestError::ResponseTimeout => {
+                            println!("[{}:{}] ResponseTimeout", file!(), line!())
+                        }
+                        crate::RequestError::NoConnection => {
+                            println!("[{}:{}] NoConnection", file!(), line!())
+                        }
+                        crate::RequestError::Internal(internal) => {
+                            println!("[{}:{}] Err! {:?}", file!(), line!(), internal)
+                        }
+                        crate::RequestError::Shutdown => {
+                            println!("Session with {:?} terminated due to Shutdown.", client_addr)
+                        }
+                    }
                 }
 
                 Err(e) => {
-                    tracing::error!("Error al aceptar conection: {:?}", e);
+                    tracing::error!("Error accepting connection: {:?}", e);
                 }
             }
         }
@@ -335,68 +327,4 @@ pub async fn spawn_rtu_overtcp_server_task<T: RequestHandler>(
     tokio::spawn(task);
 
     Ok(ServerHandle::new(tx))
-}
-
-const MIN_RTU_FRAME_SIZE: usize = 4; // Mínimo: Unit ID (1) + Function Code (1) + CRC (2)
-
-#[derive(Copy, Clone)]
-
-/// ModbusRtuOverTcpCodec
-pub struct ModbusRtuOverTcpCodec;
-
-impl Decoder for ModbusRtuOverTcpCodec {
-    type Item = (u8, u8, Vec<u8>); // Unit ID y Datos
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // Verificar longitud mínima
-        if src.len() < MIN_RTU_FRAME_SIZE {
-            return Ok(None); // Esperar más datos
-        }
-
-        // Extraer Unit ID, Function Code, y Datos (ignorando el CRC)
-        let unit_id = src[0];
-        let function_code = src[1];
-        let data_end = src.len() - 2; // Excluye el CRC
-        let data = src[2..data_end].to_vec();
-
-        // Remover los bytes procesados del buffer
-        src.advance(src.len());
-
-        Ok(Some((unit_id, function_code, data)))
-    }
-}
-
-impl Encoder<(u8, Vec<u8>)> for ModbusRtuOverTcpCodec {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: (u8, Vec<u8>), dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let (unit_id, data) = item;
-
-        // Crea la trama RTU
-        dst.extend_from_slice(&[unit_id]); //unit ID
-        dst.extend_from_slice(&data); //Datos
-
-        // Calcular el CRC
-        let crc = calculate_crc(&dst);
-        dst.extend_from_slice(&crc.to_le_bytes());
-
-        Ok(())
-    }
-}
-
-fn calculate_crc(frame: &[u8]) -> u16 {
-    let mut crc: u16 = 0xFFFF;
-    for &byte in frame {
-        crc ^= byte as u16;
-        for _ in 0..8 {
-            if crc & 0x0001 != 0 {
-                crc >>= 1;
-                crc ^= 0xA001;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-    crc
 }
