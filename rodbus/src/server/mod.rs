@@ -280,15 +280,15 @@ pub async fn spawn_rtu_overtcp_server_task<T: RequestHandler>(
         loop {
             match listener.accept().await {
                 Ok((stream, client_addr)) => {
-                    tracing::info!("New connection from {:?}", addr);
-                    println!("[{}:{}] New connection from {:?}", file!(), line!(), addr);
+                    tracing::info!("New connection from {:?}", client_addr);
+                    println!("[:{}] New connection from {:?}", line!(), client_addr);
 
                     let mut phys_layer = crate::common::phys::PhysLayer::new_tcp(stream);
 
                     let result = session.run(&mut phys_layer).await;
                     match result {
                         crate::RequestError::Io(error_kind) => {
-                            println!("[{}:{}] Err! {:?}", file!(), line!(), error_kind)
+                            println!("[:{}] Err! {:?}", line!(), error_kind)
                         }
                         crate::RequestError::Exception(exception_code) => {
                             println!("[{}:{}] Err! {:?}", file!(), line!(), exception_code)
