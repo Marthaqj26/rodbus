@@ -1,6 +1,5 @@
-use std::net::{IpAddr, SocketAddr};
-
 use crate::decode::DecodeLevel;
+use std::net::{IpAddr, SocketAddr};
 
 /// persistent communication channel such as a TCP connection
 pub(crate) mod channel;
@@ -98,10 +97,14 @@ pub fn spawn_tcp_client_task(
     decode: DecodeLevel,
     listener: Option<Box<dyn Listener<ClientState>>>,
 ) -> Channel {
+    let frame_writer = crate::common::frame::FrameWriter::tcp();
+    let frame_reader = crate::common::frame::FramedReader::tcp();
     crate::tcp::client::spawn_tcp_channel(
         host,
         max_queued_requests,
         retry,
+        frame_writer,
+        frame_reader,
         decode,
         listener.unwrap_or_else(|| NullListener::create()),
     )
@@ -164,12 +167,62 @@ pub fn spawn_tls_client_task(
     decode: DecodeLevel,
     listener: Option<Box<dyn Listener<ClientState>>>,
 ) -> Channel {
+    let frame_writer = crate::common::frame::FrameWriter::tcp();
+    let frame_reader = crate::common::frame::FramedReader::tcp();
     spawn_tls_channel(
         host,
         max_queued_requests,
         retry,
+        frame_writer,
+        frame_reader,
         tls_config,
         decode,
         listener.unwrap_or_else(|| NullListener::create()),
     )
+}
+///
+///
+pub fn spawn_rtu_overtcp_client_task(
+    addr: HostAddr,
+    max_queued_requests: usize,
+    retry: Box<dyn RetryStrategy>,
+    decode: DecodeLevel,
+    listener: Option<Box<dyn Listener<ClientState>>>,
+) -> Channel {
+    let listener = listener.unwrap_or_else(|| NullListener::create());
+    let (handle, task) =
+        create_rtu_overtcp_handle_and_task(addr, max_queued_requests, retry, decode, listener);
+    tokio::spawn(task);
+    handle
+}
+
+fn create_rtu_overtcp_handle_and_task(
+    addr: HostAddr,
+    max_queued_requests: usize,
+    retry: Box<dyn RetryStrategy>,
+    decode: DecodeLevel,
+    listener: Box<dyn Listener<ClientState>>,
+) -> (Channel, impl std::future::Future<Output = ()>) {
+    let (tx, rx) = tokio::sync::mpsc::channel(max_queued_requests);
+
+    let task = async move {
+        let frame_writer = crate::common::frame::FrameWriter::rtu();
+        let frame_reader = crate::common::frame::FramedReader::rtu_response();
+        let connection_handler = crate::tcp::client::TcpTaskConnectionHandler::Tcp;
+
+        let mut task = crate::tcp::client::TcpChannelTask::new(
+            addr,
+            rx.into(),
+            connection_handler,
+            frame_writer,
+            frame_reader,
+            retry,
+            decode,
+            listener,
+        );
+
+        task.run().await;
+    };
+
+    (Channel { tx }, task)
 }

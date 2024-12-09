@@ -16,11 +16,20 @@ pub(crate) fn spawn_tcp_channel(
     host: HostAddr,
     max_queued_requests: usize,
     connect_retry: Box<dyn RetryStrategy>,
+    frame_writer: FrameWriter,
+    frame_reader: FramedReader,
     decode: DecodeLevel,
     listener: Box<dyn Listener<ClientState>>,
 ) -> Channel {
-    let (handle, task) =
-        create_tcp_channel(host, max_queued_requests, connect_retry, decode, listener);
+    let (handle, task) = create_tcp_channel(
+        host,
+        max_queued_requests,
+        connect_retry,
+        frame_writer,
+        frame_reader,
+        decode,
+        listener,
+    );
     tokio::spawn(task);
     handle
 }
@@ -29,6 +38,8 @@ pub(crate) fn create_tcp_channel(
     host: HostAddr,
     max_queued_requests: usize,
     connect_retry: Box<dyn RetryStrategy>,
+    frame_writer: FrameWriter,
+    frame_reader: FramedReader,
     decode: DecodeLevel,
     listener: Box<dyn Listener<ClientState>>,
 ) -> (Channel, impl std::future::Future<Output = ()>) {
@@ -38,6 +49,8 @@ pub(crate) fn create_tcp_channel(
             host.clone(),
             rx.into(),
             TcpTaskConnectionHandler::Tcp,
+            frame_writer,
+            frame_reader,
             connect_retry,
             decode,
             listener,
@@ -82,6 +95,8 @@ impl TcpChannelTask {
         host: HostAddr,
         rx: crate::channel::Receiver<Command>,
         connection_handler: TcpTaskConnectionHandler,
+        frame_writer: FrameWriter,
+        frame_reader: FramedReader,
         connect_retry: Box<dyn RetryStrategy>,
         decode: DecodeLevel,
         listener: Box<dyn Listener<ClientState>>,
@@ -90,7 +105,7 @@ impl TcpChannelTask {
             host,
             connect_retry,
             connection_handler,
-            client_loop: ClientLoop::new(rx, FrameWriter::tcp(), FramedReader::tcp(), decode),
+            client_loop: ClientLoop::new(rx, frame_writer, frame_reader, decode),
             listener,
         }
     }
