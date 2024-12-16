@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use listener::{Listener, NullListenerServer, ServerState};
 use tracing::Instrument;
 
 use crate::decode::DecodeLevel;
@@ -9,6 +10,8 @@ use crate::tcp::server::{ServerTask, TcpServerConnectionHandler};
 /// server handling
 mod address_filter;
 pub(crate) mod handler;
+/// Module that contains the features and structures related to listeners.
+pub mod listener;
 pub(crate) mod request;
 pub(crate) mod response;
 pub(crate) mod task;
@@ -21,6 +24,7 @@ use crate::error::Shutdown;
 
 pub use address_filter::*;
 pub use handler::*;
+
 pub use types::*;
 
 // re-export to the public API
@@ -68,19 +72,21 @@ pub async fn spawn_tcp_server_task<T: RequestHandler>(
     handlers: ServerHandlerMap<T>,
     filter: AddressFilter,
     decode: DecodeLevel,
+    event_listener: Option<Box<dyn Listener<ServerState>>>,
 ) -> Result<ServerHandle, std::io::Error> {
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let tcp_listener = tokio::net::TcpListener::bind(addr).await?;
 
     let (tx, rx) = tokio::sync::mpsc::channel(SERVER_SETTING_CHANNEL_CAPACITY);
 
     let task = async move {
         ServerTask::new(
             max_sessions,
-            listener,
+            tcp_listener,
             handlers,
             TcpServerConnectionHandler::Tcp,
             filter,
             decode,
+            Some(event_listener.unwrap_or_else(|| NullListenerServer::create())),
         )
         .run(rx)
         .instrument(tracing::info_span!("Modbus-Server-TCP", "listen" = ?addr))
@@ -161,6 +167,7 @@ pub async fn spawn_tls_server_task<T: RequestHandler>(
     tls_config: TlsServerConfig,
     filter: AddressFilter,
     decode: DecodeLevel,
+    event_listener: Option<Box<dyn Listener<ServerState>>>,
 ) -> Result<ServerHandle, std::io::Error> {
     spawn_tls_server_task_impl(
         max_sessions,
@@ -170,6 +177,7 @@ pub async fn spawn_tls_server_task<T: RequestHandler>(
         tls_config,
         filter,
         decode,
+        Some(event_listener.unwrap_or_else(|| NullListenerServer::create())),
     )
     .await
 }
@@ -199,6 +207,7 @@ pub async fn spawn_tls_server_task_with_authz<T: RequestHandler>(
     tls_config: TlsServerConfig,
     filter: AddressFilter,
     decode: DecodeLevel,
+    event_listener: Option<Box<dyn Listener<ServerState>>>,
 ) -> Result<ServerHandle, std::io::Error> {
     spawn_tls_server_task_impl(
         max_sessions,
@@ -208,6 +217,7 @@ pub async fn spawn_tls_server_task_with_authz<T: RequestHandler>(
         tls_config,
         filter,
         decode,
+        Some(event_listener.unwrap_or_else(|| NullListenerServer::create())),
     )
     .await
 }
@@ -221,6 +231,7 @@ async fn spawn_tls_server_task_impl<T: RequestHandler>(
     tls_config: TlsServerConfig,
     filter: AddressFilter,
     decode: DecodeLevel,
+    event_listener: Option<Box<dyn Listener<ServerState>>>,
 ) -> Result<ServerHandle, std::io::Error> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
@@ -234,6 +245,7 @@ async fn spawn_tls_server_task_impl<T: RequestHandler>(
             TcpServerConnectionHandler::Tls(tls_config, auth_handler),
             filter,
             decode,
+            Some(event_listener.unwrap_or_else(|| NullListenerServer::create())),
         )
         .run(rx)
         .instrument(tracing::info_span!("Modbus-Server-TLS", "listen" = ?addr))

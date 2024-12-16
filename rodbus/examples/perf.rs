@@ -64,6 +64,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ip = IpAddr::from_str("127.0.0.1")?;
     let addr = SocketAddr::new(ip, args.port);
 
+    struct LoggingListenerServer;
+
+    impl<T> rodbus::server::listener::Listener<T> for LoggingListenerServer
+    where
+        T: std::fmt::Debug,
+    {
+        fn update(&mut self, value: T) -> MaybeAsync<()> {
+            tracing::info!("Channel Listener: {:?}", value);
+            MaybeAsync::ready(())
+        }
+    }
+
     let handler = Handler {}.wrap();
 
     let _handle = spawn_tcp_server_task(
@@ -76,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             FrameDecodeLevel::Nothing,
             PhysDecodeLevel::Nothing,
         ),
+        Some(Box::new(LoggingListenerServer)),
     )
     .await?;
 

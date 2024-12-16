@@ -112,6 +112,17 @@ impl RequestHandler for Handler {
     }
 }
 
+struct LoggingListenerServer;
+
+impl<T> rodbus::server::listener::Listener<T> for LoggingListenerServer
+where
+    T: std::fmt::Debug,
+{
+    fn update(&mut self, value: T) -> MaybeAsync<()> {
+        tracing::info!("Channel Listener: {:?}", value);
+        MaybeAsync::ready(())
+    }
+}
 async fn test_requests_and_responses() {
     let handler = Handler::new().wrap();
     let addr = SocketAddr::from_str("127.0.0.1:40000").unwrap();
@@ -122,6 +133,7 @@ async fn test_requests_and_responses() {
         ServerHandlerMap::single(UnitId::new(1), handler.clone()),
         AddressFilter::Any,
         DecodeLevel::default(),
+        Some(Box::new(LoggingListenerServer)),
     )
     .await
     .unwrap();

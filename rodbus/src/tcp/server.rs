@@ -6,6 +6,7 @@ use crate::common::frame::{FrameWriter, FramedReader};
 use crate::common::phys::PhysLayer;
 use crate::decode::DecodeLevel;
 use crate::server::handler::{RequestHandler, ServerHandlerMap};
+use crate::server::listener::{Listener, ServerState};
 use crate::server::task::{AuthorizationType, ServerSetting};
 
 use crate::server::AddressFilter;
@@ -106,6 +107,8 @@ pub(crate) struct ServerTask<T: RequestHandler> {
     decode: DecodeLevel,
     tx: tokio::sync::mpsc::Sender<SessionClose>,
     rx: tokio::sync::mpsc::Receiver<SessionClose>,
+    event_listener:
+        Option<Box<dyn crate::server::listener::Listener<crate::server::listener::ServerState>>>,
 }
 
 impl<T> ServerTask<T>
@@ -119,6 +122,7 @@ where
         connection_handler: TcpServerConnectionHandler,
         filter: AddressFilter,
         decode: DecodeLevel,
+        event_listener: Option<Box<dyn Listener<ServerState>>>,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
 
@@ -131,6 +135,7 @@ where
             decode,
             tx,
             rx,
+            event_listener,
         }
     }
 
@@ -151,6 +156,9 @@ where
     }
 
     pub(crate) async fn run(&mut self, mut commands: tokio::sync::mpsc::Receiver<ServerSetting>) {
+        if let Some(listener) = &mut self.event_listener {
+            listener.update(ServerState::Connecting).get().await;
+        }
         loop {
             tokio::select! {
                setting = commands.recv() => {
@@ -158,6 +166,9 @@ where
                         Some(setting) => self.change_setting(setting).await,
                         None => {
                             tracing::info!("server shutdown");
+                            if let Some(listener) = &mut self.event_listener {
+                                listener.update(ServerState::Shutdown).get().await;
+                            }
                             return; // shutdown signal
                         }
                     }
@@ -179,7 +190,16 @@ where
                                 if let Err(err) = socket.set_nodelay(true) {
                                     tracing::warn!("unable to enable TCP_NODELAY: {}", err);
                                 }
-                                self.handle(socket, addr).await
+                                if let Some(listener) = &mut self.event_listener {
+                                    listener.update(ServerState::Connecting).get().await;
+                                }
+                                self.handle(socket, addr).await;
+
+                                if let Some(listener) = &mut self.event_listener {
+                                    listener.update(ServerState::Connecting).get().await;
+                                }
+
+
                             } else {
                                 tracing::warn!("IP address {:?} does not match filter {:?}, closing connection", addr.ip(), self.filter);
                             }

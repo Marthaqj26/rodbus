@@ -2,10 +2,12 @@
 
 use std::process::exit;
 
+use listener::Listener;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, LinesCodec};
 
 use rodbus::server::*;
+
 use rodbus::*;
 
 struct SimpleHandler {
@@ -163,6 +165,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+struct LoggingListener;
+
+impl<T> Listener<T> for LoggingListener
+where
+    T: std::fmt::Debug,
+{
+    fn update(&mut self, value: T) -> MaybeAsync<()> {
+        tracing::info!("Channel Listener: {:?}", value);
+        MaybeAsync::ready(())
+    }
+}
 async fn run_tcp() -> Result<(), Box<dyn std::error::Error>> {
     let (handler, map) = create_handler();
 
@@ -173,6 +186,7 @@ async fn run_tcp() -> Result<(), Box<dyn std::error::Error>> {
         map,
         AddressFilter::Any,
         DecodeLevel::default(),
+        Some(Box::new(LoggingListener)),
     )
     .await?;
     // ANCHOR_END: tcp_server_create
@@ -214,6 +228,7 @@ async fn run_tls(tls_config: TlsServerConfig) -> Result<(), Box<dyn std::error::
         tls_config,
         AddressFilter::Any,
         DecodeLevel::default(),
+        Some(Box::new(LoggingListener)),
     )
     .await?;
     // ANCHOR_END: tls_server_create

@@ -1,7 +1,7 @@
 use crate::Database;
 use crate::{ffi, RuntimeHandle};
 use rodbus::server::ServerHandle;
-use rodbus::{ExceptionCode, Indexed, UnitId};
+use rodbus::{ExceptionCode, Indexed, MaybeAsync, UnitId};
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::net::{IpAddr, SocketAddr};
@@ -275,6 +275,17 @@ fn get_socket_addr(ip: &std::ffi::CStr, port: u16) -> Result<SocketAddr, ffi::Pa
     let ip = ip.parse::<IpAddr>()?;
     Ok(SocketAddr::new(ip, port))
 }
+struct LoggingListenerServer;
+
+impl<T> rodbus::server::listener::Listener<T> for LoggingListenerServer
+where
+    T: std::fmt::Debug,
+{
+    fn update(&mut self, value: T) -> MaybeAsync<()> {
+        tracing::info!("Channel Listener: {:?}", value);
+        MaybeAsync::ready(())
+    }
+}
 
 pub(crate) unsafe fn server_create_tcp(
     runtime: *mut crate::Runtime,
@@ -297,6 +308,7 @@ pub(crate) unsafe fn server_create_tcp(
         handler_map.clone(),
         filter.into(),
         decode_level.into(),
+        Some(Box::new(LoggingListenerServer)),
     );
 
     let handle = runtime
@@ -474,6 +486,7 @@ pub(crate) unsafe fn server_create_tls_impl(
                 tls_config,
                 filter.into(),
                 decode_level.into(),
+                Some(Box::new(LoggingListenerServer)),
             );
 
             runtime
@@ -489,6 +502,7 @@ pub(crate) unsafe fn server_create_tls_impl(
                 tls_config,
                 rodbus::server::AddressFilter::Any,
                 decode_level.into(),
+                Some(Box::new(LoggingListenerServer)),
             );
 
             runtime

@@ -109,7 +109,6 @@ impl TcpChannelTask {
             listener,
         }
     }
-
     // runs until it is shut down
     pub(crate) async fn run(&mut self) -> Shutdown {
         self.listener.update(ClientState::Disabled).get().await;
