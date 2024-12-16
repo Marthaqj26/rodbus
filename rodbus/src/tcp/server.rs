@@ -191,7 +191,7 @@ where
                                     tracing::warn!("unable to enable TCP_NODELAY: {}", err);
                                 }
                                 if let Some(listener) = &mut self.event_listener {
-                                    listener.update(ServerState::Connecting).get().await;
+                                    listener.update(ServerState::Connected).get().await;
                                 }
                                 self.handle(socket, addr).await;
 
