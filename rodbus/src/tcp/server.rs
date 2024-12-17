@@ -180,9 +180,11 @@ where
                    // this will never be None b/c we always keep a tx live
                    let id = shutdown.unwrap().0;
                    log::debug!("4");
-
+                   if let Some(listener) = &mut self.event_listener {
+                    listener.update(ServerState::Disabled).get().await;
+                }
                    self.tracker.remove(id);
-                   log::debug!("4");
+
                }
                result = self.listener.accept() => {
                    match result {
@@ -204,9 +206,6 @@ where
                                 self.handle(socket, addr).await;
                                 log::debug!("9");
 
-                                if let Some(listener) = &mut self.event_listener {
-                                    listener.update(ServerState::Connecting).get().await;
-                                }
 
 
                             } else {
