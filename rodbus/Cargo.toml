@@ -25,6 +25,7 @@ tokio-stream = "0.1"
 tokio = { workspace = true, features = ["net", "sync", "io-util", "io-std", "time", "rt", "rt-multi-thread", "macros"] }
 tracing = { workspace = true }
 futures-util = "0.3"
+log = "0.4"
 
 # TLS dependencies
 rx509 = { version = "^0.2", optional = true }

@@ -158,14 +158,17 @@ where
     pub(crate) async fn run(&mut self, mut commands: tokio::sync::mpsc::Receiver<ServerSetting>) {
         if let Some(listener) = &mut self.event_listener {
             listener.update(ServerState::Connecting).get().await;
+            log::debug!("1");
         }
         loop {
             tokio::select! {
                setting = commands.recv() => {
                     match setting {
-                        Some(setting) => self.change_setting(setting).await,
+                        Some(setting) => { log::debug!("2");
+                        self.change_setting(setting).await},
                         None => {
                             tracing::info!("server shutdown");
+                            log::debug!("3");
                             if let Some(listener) = &mut self.event_listener {
                                 listener.update(ServerState::Shutdown).get().await;
                             }
@@ -176,24 +179,30 @@ where
                shutdown = self.rx.recv() => {
                    // this will never be None b/c we always keep a tx live
                    let id = shutdown.unwrap().0;
+                   log::debug!("4");
 
                    self.tracker.remove(id);
+                   log::debug!("4");
                }
                result = self.listener.accept() => {
                    match result {
                         Err(err) => {
                             tracing::error!("error accepting connection: {}", err);
+                            log::debug!("6");
                             return;
                         }
                         Ok((socket, addr)) => {
                             if self.filter.matches(addr.ip()) {
                                 if let Err(err) = socket.set_nodelay(true) {
                                     tracing::warn!("unable to enable TCP_NODELAY: {}", err);
+                                    log::debug!("7");
                                 }
                                 if let Some(listener) = &mut self.event_listener {
                                     listener.update(ServerState::Connected).get().await;
                                 }
+                                log::debug!("8");
                                 self.handle(socket, addr).await;
+                                log::debug!("9");
 
                                 if let Some(listener) = &mut self.event_listener {
                                     listener.update(ServerState::Connecting).get().await;
@@ -202,6 +211,7 @@ where
 
                             } else {
                                 tracing::warn!("IP address {:?} does not match filter {:?}, closing connection", addr.ip(), self.filter);
+                                log::debug!("10");
                             }
                         }
                    }
@@ -218,6 +228,7 @@ where
             addr,
             id
         );
+        log::debug!("11");
 
         #[allow(unused_mut)]
         let mut notify_close = self.tx.clone();
@@ -235,10 +246,10 @@ where
                 rx,
             )
             .await;
-
+            log::debug!("12");
             // no matter what happens, we send the id back to the server
             let _ = notify_close.send(SessionClose(id)).await;
-
+            log::debug!("13");
             tracing::info!("session shutdown");
         };
 
