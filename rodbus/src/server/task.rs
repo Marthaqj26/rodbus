@@ -30,6 +30,7 @@ where
     writer: FrameWriter,
     reader: FramedReader,
     decode: DecodeLevel,
+    event_listener: Option<Box<dyn crate::server::Listener<crate::server::ServerState>>>,
 }
 
 impl<T> SessionTask<T>
@@ -51,6 +52,27 @@ where
             writer,
             reader,
             decode,
+            event_listener: None,
+        }
+    }
+
+    pub(crate) fn new_with_event_listener(
+        handlers: ServerHandlerMap<T>,
+        auth: AuthorizationType,
+        writer: FrameWriter,
+        reader: FramedReader,
+        commands: tokio::sync::mpsc::Receiver<ServerSetting>,
+        decode: DecodeLevel,
+        event_listener: Option<Box<dyn crate::server::Listener<crate::server::ServerState>>>,
+    ) -> Self {
+        Self {
+            handlers,
+            auth,
+            writer,
+            reader,
+            commands,
+            decode,
+            event_listener,
         }
     }
 
@@ -81,6 +103,12 @@ where
     }
 
     pub(crate) async fn run(&mut self, io: &mut PhysLayer) -> RequestError {
+        if let Some(listener) = &mut self.event_listener {
+            listener
+                .update(crate::server::ServerState::Connecting)
+                .get()
+                .await;
+        }
         loop {
             if let Err(err) = self.run_one(io).await {
                 tracing::warn!("session error: {}", err);
@@ -118,6 +146,10 @@ where
         tokio::select! {
             frame = self.reader.next_frame(io, self.decode) => {
                 let frame = frame?;
+
+                if let Some(listener) = &mut self.event_listener {
+                    listener.update( crate::server::ServerState::Connected).get().await;
+                }
                 self.handle_frame(io, frame).await
             }
             cmd = self.commands.recv() => {

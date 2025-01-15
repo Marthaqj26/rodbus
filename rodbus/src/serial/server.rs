@@ -2,7 +2,6 @@ use crate::common::phys::PhysLayer;
 use crate::server::task::SessionTask;
 use crate::server::RequestHandler;
 use crate::{RequestError, RetryStrategy, SerialSettings, Shutdown};
-
 pub(crate) struct RtuServerTask<T>
 where
     T: RequestHandler,
@@ -11,6 +10,7 @@ where
     pub(crate) retry: Box<dyn RetryStrategy>,
     pub(crate) settings: SerialSettings,
     pub(crate) session: SessionTask<T>,
+    //pub(crate) event_listener: Option<Box<dyn Listener<ServerState>>>,
 }
 
 impl<T> RtuServerTask<T>
@@ -25,12 +25,14 @@ where
                     tracing::info!("opened port");
                     // run an open port until shutdown or failure
                     let mut phys = PhysLayer::new_serial(serial);
+
                     if let RequestError::Shutdown = self.session.run(&mut phys).await {
                         return Shutdown;
                     }
                     // we wait here to prevent any kind of rapid retry scenario if the port opens and immediately fails
                     let delay = self.retry.after_disconnect();
                     tracing::warn!("waiting {:?} to reopen port", delay);
+
                     if let Err(Shutdown) = self.session.sleep_for(delay).await {
                         return Shutdown;
                     }

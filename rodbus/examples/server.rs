@@ -209,6 +209,7 @@ async fn run_rtu() -> Result<(), Box<dyn std::error::Error>> {
             FrameDecodeLevel::Payload,
             PhysDecodeLevel::Data,
         ),
+        Some(Box::new(LoggingListener)),
     )?;
     // ANCHOR_END: rtu_server_create
 

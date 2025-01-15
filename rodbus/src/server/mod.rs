@@ -114,15 +114,19 @@ pub fn spawn_rtu_server_task<T: RequestHandler>(
     retry: Box<dyn crate::retry::RetryStrategy>,
     handlers: ServerHandlerMap<T>,
     decode: DecodeLevel,
+    event_listener: Option<Box<dyn Listener<ServerState>>>,
 ) -> Result<ServerHandle, std::io::Error> {
     let (tx, rx) = tokio::sync::mpsc::channel(SERVER_SETTING_CHANNEL_CAPACITY);
-    let session = crate::server::task::SessionTask::new(
+    let event_listener = event_listener.unwrap_or_else(|| NullListenerServer::create());
+
+    let session = crate::server::task::SessionTask::new_with_event_listener(
         handlers,
         crate::server::task::AuthorizationType::None,
         crate::common::frame::FrameWriter::rtu(),
         crate::common::frame::FramedReader::rtu_request(),
         rx,
         decode,
+        Some(event_listener),
     );
 
     let mut rtu = crate::serial::server::RtuServerTask {
